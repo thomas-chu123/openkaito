@@ -197,6 +197,10 @@ class Miner(BaseMinerNeuron):
 
         import openai
 
+        bt.logging.info(
+            f"received TextEmbedding Synapse... timeout:{query.timeout}s ", query
+        )
+
         client = openai.OpenAI(
             api_key=os.environ["OPENAI_API_KEY"],
             organization=os.getenv("OPENAI_ORGANIZATION"),

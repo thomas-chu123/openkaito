@@ -21,36 +21,36 @@ from openkaito.utils.embeddings import pad_tensor, text_embedding, MAX_EMBEDDING
 
 
 root_dir = __file__.split("scripts")[0]
-index_name = "eth_denver"
+index_name = "eth_cc7"
 
 
 ### Extract Eth Denver dataset
-def extract_eth_denver_dataset():
+def extract_eth_cc7_dataset():
     """Extract Eth Denver dataset to datasets/eth_denver_dataset directory"""
 
-    if os.path.exists(root_dir + "datasets/eth_denver_dataset"):
+    if os.path.exists(root_dir + "datasets/eth_cc7_dataset"):
         print(
-            "Eth Denver data already extracted to: ",
-            root_dir + "datasets/eth_denver_dataset",
+            "Eth cc7 data already extracted to: ",
+            root_dir + "datasets/eth_cc7_dataset",
         )
     else:
         import tarfile
 
         with tarfile.open(
-            root_dir + "datasets/eth_denver_dataset.tar.gz", "r:gz"
+            root_dir + "datasets/eth_cc7_dataset.tar.gz", "r:gz"
         ) as tar:
             tar.extractall(root_dir + "datasets")
 
         print(
-            "Eth Denver data extracted to: ", root_dir + "datasets/eth_denver_dataset"
+            "Eth cc7 data extracted to: ", root_dir + "datasets/eth_cc7_dataset"
         )
 
-    dataset_dir = root_dir + "datasets/eth_denver_dataset"
+    dataset_dir = root_dir + "datasets/eth_cc7_dataset"
     dataset_path = Path(dataset_dir)
     print(f"{len(list(dataset_path.glob('*.json')))} files in {dataset_dir}")
 
 
-def init_eth_denver_index(search_client):
+def init_eth_cc7_index(search_client):
     """Initialize Eth Denver index in Elasticsearch"""
 
     if not search_client.indices.exists(index=index_name):
@@ -97,7 +97,7 @@ def drop_index(search_client, index_name):
 def indexing_docs(search_client):
     """Index documents in Elasticsearch"""
 
-    dataset_dir = root_dir + "datasets/eth_denver_dataset"
+    dataset_dir = root_dir + "datasets/eth_cc7_dataset"
     dataset_path = Path(dataset_dir)
 
     num_files = len(list(dataset_path.glob("*.json")))
@@ -176,12 +176,12 @@ def test_retrieval(search_client, query, topk=5):
 if __name__ == "__main__":
     load_dotenv()
 
-    dataset_dir = root_dir + "datasets/eth_denver_dataset"
+    dataset_dir = root_dir + "datasets/eth_cc7_dataset"
     dataset_path = Path(dataset_dir)
 
     num_files = len(list(dataset_path.glob("*.json")))
 
-    extract_eth_denver_dataset()
+    extract_eth_cc7_dataset()
 
     search_client = Elasticsearch(
         os.environ["ELASTICSEARCH_HOST"],
@@ -195,7 +195,7 @@ if __name__ == "__main__":
     )
 
     # drop_index(search_client, index_name)
-    init_eth_denver_index(search_client)
+    init_eth_cc7_index(search_client)
 
     r = search_client.count(index=index_name)
     if r["count"] != num_files:
