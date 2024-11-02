@@ -39,6 +39,11 @@ from openkaito.search.structured_search_engine import StructuredSearchEngine
 from openkaito.utils.embeddings import openai_embeddings_tensor
 from openkaito.utils.version import compare_version, get_version
 
+import openai
+from sentence_transformers import SentenceTransformer
+from transformers.utils import logging
+import torch.nn.functional as F
+logging.set_verbosity_error()
 
 class Miner(BaseMinerNeuron):
     """
@@ -80,6 +85,19 @@ class Miner(BaseMinerNeuron):
             relevance_ranking_model=ranking_model,
             twitter_crawler=twitter_crawler,
             recall_size=self.config.neuron.search_recall_size,
+        )
+
+        # init custom embeddings model
+        # self.model = SentenceTransformer("dunzhang/stella_en_1.5B_v5", trust_remote_code=True).cuda()
+        # self.model = SentenceTransformer("dunzhang/stella_en_400M_v5", trust_remote_code=True)
+        # self.model = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True).cuda()
+
+        # openai embeddings model
+        self.client = openai.OpenAI(
+            api_key=os.environ["OPENAI_API_KEY"],
+            organization=os.getenv("OPENAI_ORGANIZATION"),
+            project=os.getenv("OPENAI_PROJECT"),
+            max_retries=3,
         )
 
     async def forward_search(self, query: SearchSynapse) -> SearchSynapse:
@@ -195,23 +213,30 @@ class Miner(BaseMinerNeuron):
         texts = query.texts
         dimensions = query.dimensions
 
-        import openai
-
+        time_start = time.time()
+        texts = [text.replace("\n", " ") for text in texts]
         bt.logging.info(
-            f"received TextEmbedding Synapse... timeout:{query.timeout}s ", query
+            f"received TextEmbedding Synapse... timeout:{query.timeout}s with text lens: {str(len(query.texts))} "
+            f"and dimensions: {query.dimensions}",
         )
+        # embeddings = self.model.encode(texts, convert_to_tensor=True, show_progress_bar=True,
+        #                                   device="cuda", batch_size=256, num_workers=4)
+        # embeddings = F.layer_norm(embeddings, normalized_shape=(embeddings.shape[1],))
+        # embeddings = embeddings[:, :512]
+        # embeddings = F.normalize(embeddings, p=2, dim=1)
+        # query.results = embeddings.tolist()
 
-        client = openai.OpenAI(
-            api_key=os.environ["OPENAI_API_KEY"],
-            organization=os.getenv("OPENAI_ORGANIZATION"),
-            project=os.getenv("OPENAI_PROJECT"),
-            max_retries=3,
-        )
 
         embeddings = openai_embeddings_tensor(
-            client, texts, dimensions=dimensions, model="text-embedding-3-large"
+           self.client, texts, dimensions=dimensions, model="text-embedding-3-large"
         )
         query.results = embeddings.tolist()
+
+        time_end = time.time()
+        elapsed_time = time_end - time_start
+        bt.logging.info(
+            f"processed TextEmbedding Synapse in {elapsed_time} seconds",
+        )
         return query
 
     def print_info(self):

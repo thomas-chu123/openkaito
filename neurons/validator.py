@@ -104,7 +104,7 @@ class Validator(BaseValidatorNeuron):
             self.config.neuron.wandb_off = True
 
         if not self.config.neuron.wandb_off:
-            # wandb.login(key=os.environ["WANDB_API_KEY"], verify=True, relogin=True)
+            wandb.login(key=os.environ["WANDB_API_KEY"], verify=True, relogin=True)
             wandb.init(
                 project=f"sn{self.config.netuid}-validators",
                 entity="sn-openkaito-openkaito",
@@ -113,7 +113,7 @@ class Validator(BaseValidatorNeuron):
                     "spec_version": openkaito.__spec_version__,
                 },
                 name=f"validator-{self.uid}-{__version__}",
-                # resume="auto",
+                resume="auto",
                 dir=self.config.neuron.full_path,
                 reinit=True,
             )

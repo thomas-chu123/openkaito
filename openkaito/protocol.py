@@ -184,5 +184,5 @@ class TextEmbeddingSynapse(bt.Synapse):
 
     results: Optional[List[List[float]]] = None
 
-    def deserialize(self) -> List[Dict]:
+    def deserialize(self) -> list[list[float]] | None:
         return self.results
