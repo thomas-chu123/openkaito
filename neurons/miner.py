@@ -237,6 +237,7 @@ class Miner(BaseMinerNeuron):
         # Google embeddings
         embeddings = genai.embed_content(
             model="models/text-embedding-004",
+            task_type="retrieval_document",
             content=texts,
             output_dimensionality=query.dimensions,
         )
