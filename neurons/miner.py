@@ -91,6 +91,7 @@ class Miner(BaseMinerNeuron):
         # self.model = SentenceTransformer("dunzhang/stella_en_1.5B_v5", trust_remote_code=True).cuda()
         # self.model = SentenceTransformer("dunzhang/stella_en_400M_v5", trust_remote_code=True)
         # self.model = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True).cuda()
+        self.model = SentenceTransformer("jinaai/jina-embeddings-v2-base-en", trust_remote_code=True)
 
         # openai embeddings model
         self.client = openai.OpenAI(
@@ -219,23 +220,20 @@ class Miner(BaseMinerNeuron):
             f"received TextEmbedding Synapse... timeout:{query.timeout}s with text lens: {str(len(query.texts))} "
             f"and dimensions: {query.dimensions}",
         )
-        # embeddings = self.model.encode(texts, convert_to_tensor=True, show_progress_bar=True,
-        #                                   device="cuda", batch_size=256, num_workers=4)
-        # embeddings = F.layer_norm(embeddings, normalized_shape=(embeddings.shape[1],))
-        # embeddings = embeddings[:, :512]
-        # embeddings = F.normalize(embeddings, p=2, dim=1)
-        # query.results = embeddings.tolist()
-
-
-        embeddings = openai_embeddings_tensor(
-           self.client, texts, dimensions=dimensions, model="text-embedding-3-large"
-        )
+        embeddings = self.model.encode(texts, convert_to_tensor=True, normalize_embeddings=True, device="cpu",
+                                       show_progress_bar=True, batch_size=32, num_workers=8)
         query.results = embeddings.tolist()
+
+
+        # embeddings = openai_embeddings_tensor(
+        #    self.client, texts, dimensions=dimensions, model="text-embedding-3-large"
+        # )
+        # query.results = embeddings.tolist()
 
         time_end = time.time()
         elapsed_time = time_end - time_start
         bt.logging.info(
-            f"processed TextEmbedding Synapse in {elapsed_time} seconds",
+            f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {embeddings.shape}",
         )
         return query
 
