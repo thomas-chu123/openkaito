@@ -45,6 +45,8 @@ from transformers.utils import logging
 import torch.nn.functional as F
 logging.set_verbosity_error()
 
+import google.generativeai as genai
+
 class Miner(BaseMinerNeuron):
     """
     Your miner neuron class. You should use this class to define your miner's behavior. In particular, you should replace the forward function with your own logic. You may also want to override the blacklist and priority functions according to your needs.
@@ -100,6 +102,7 @@ class Miner(BaseMinerNeuron):
             project=os.getenv("OPENAI_PROJECT"),
             max_retries=3,
         )
+        genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 
     async def forward_search(self, query: SearchSynapse) -> SearchSynapse:
         """
@@ -220,20 +223,29 @@ class Miner(BaseMinerNeuron):
             f"received TextEmbedding Synapse... timeout:{query.timeout}s with text lens: {str(len(query.texts))} "
             f"and dimensions: {query.dimensions}",
         )
-        embeddings = self.model.encode(texts, convert_to_tensor=True, normalize_embeddings=True, device="cpu",
-                                       show_progress_bar=True, batch_size=32, num_workers=8)
-        query.results = embeddings.tolist()
+        # Sentence Transformers
+        # embeddings = self.model.encode(texts, convert_to_tensor=True, normalize_embeddings=True, device="cpu",
+        #                                show_progress_bar=True, batch_size=32, num_workers=8)
+        # query.results = embeddings.tolist()
 
-
+        # OpenAI embeddings
         # embeddings = openai_embeddings_tensor(
         #    self.client, texts, dimensions=dimensions, model="text-embedding-3-large"
         # )
         # query.results = embeddings.tolist()
 
+        # Google embeddings
+        embeddings = genai.embed_content(
+            model="models/text-embedding-004",
+            content=texts,
+            output_dimensionality=query.dimensions,
+        )
+        query.results = embeddings["embedding"]
+
         time_end = time.time()
         elapsed_time = time_end - time_start
         bt.logging.info(
-            f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {embeddings.shape}",
+            f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {len(embeddings['embedding'])}",
         )
         return query
 
