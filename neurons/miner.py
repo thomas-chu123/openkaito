@@ -91,7 +91,7 @@ class Miner(BaseMinerNeuron):
         # self.model = SentenceTransformer("dunzhang/stella_en_1.5B_v5", trust_remote_code=True).cuda()
         # self.model = SentenceTransformer("dunzhang/stella_en_400M_v5", trust_remote_code=True)
         # self.model = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True).cuda()
-        self.model = SentenceTransformer("jinaai/jina-embeddings-v2-base-en", trust_remote_code=True)
+        self.model = SentenceTransformer("jinaai/jina-embeddings-v2-small-en", trust_remote_code=True)
 
         # openai embeddings model
         self.client = openai.OpenAI(
