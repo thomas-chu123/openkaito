@@ -46,6 +46,10 @@ import torch.nn.functional as F
 logging.set_verbosity_error()
 
 import google.generativeai as genai
+import asyncio
+import torch
+from sklearn.decomposition import TruncatedSVD
+from sklearn.preprocessing import normalize
 
 class Miner(BaseMinerNeuron):
     """
@@ -89,12 +93,6 @@ class Miner(BaseMinerNeuron):
             recall_size=self.config.neuron.search_recall_size,
         )
 
-        # init custom embeddings model
-        # self.model = SentenceTransformer("dunzhang/stella_en_1.5B_v5", trust_remote_code=True).cuda()
-        # self.model = SentenceTransformer("dunzhang/stella_en_400M_v5", trust_remote_code=True)
-        # self.model = SentenceTransformer("nomic-ai/nomic-embed-text-v1.5", trust_remote_code=True).cuda()
-        self.model = SentenceTransformer("jinaai/jina-embeddings-v2-small-en", trust_remote_code=True)
-
         # openai embeddings model
         self.client = openai.OpenAI(
             api_key=os.environ["OPENAI_API_KEY"],
@@ -102,7 +100,14 @@ class Miner(BaseMinerNeuron):
             project=os.getenv("OPENAI_PROJECT"),
             max_retries=3,
         )
+
         genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+        # self.model_type = "google"
+        self.model_type = "sentence-transformers"
+        # self.model = SentenceTransformer("dunzhang/stella_en_400M_v5", trust_remote_code=True).cuda()
+        # self.model = SentenceTransformer("nvidia/NV-Embed-v2", trust_remote_code=True)
+        self.model = SentenceTransformer("output/finetuned_model", trust_remote_code=True).cuda()
+        self.device = "cuda"
 
     async def forward_search(self, query: SearchSynapse) -> SearchSynapse:
         """
@@ -210,6 +215,21 @@ class Miner(BaseMinerNeuron):
         )
         return query
 
+    async def process_text(self,text):
+        if self.model_type == "sentence-transformers":
+            return self.model.encode(text, convert_to_tensor=True, normalize_embeddings=True, device=self.device,
+                                     show_progress_bar=True, batch_size=64, num_workers=8)
+        elif self.model_type == "openai":
+            pass
+        elif self.model_type == "google":
+            return genai.embed_content(
+                model="models/text-embedding-004",
+                task_type="retrieval_query",
+                content=text,
+                output_dimensionality=512,
+            )["embedding"]
+
+
     # Example of a text embedding function
     async def forward_text_embedding(
         self, query: TextEmbeddingSynapse
@@ -223,31 +243,44 @@ class Miner(BaseMinerNeuron):
             f"received TextEmbedding Synapse... timeout:{query.timeout}s with text lens: {str(len(query.texts))} "
             f"and dimensions: {query.dimensions}",
         )
-        # Sentence Transformers
-        # embeddings = self.model.encode(texts, convert_to_tensor=True, normalize_embeddings=True, device="cpu",
-        #                                show_progress_bar=True, batch_size=32, num_workers=8)
-        # query.results = embeddings.tolist()
 
-        # OpenAI embeddings
-        # embeddings = openai_embeddings_tensor(
-        #    self.client, texts, dimensions=dimensions, model="text-embedding-3-large"
-        # )
-        # query.results = embeddings.tolist()
+        if self.model_type == "sentence-transformers":
+            # Sentence Transformers
+            # embeddings = self.model.encode(texts, convert_to_tensor=True, normalize_embeddings=True)
+            tasks = [self.process_text(text) for text in texts]
+            embeddings = await asyncio.gather(*tasks)
+            query.results = [embedding[:query.dimensions].tolist() for embedding in embeddings]
 
-        # Google embeddings
-        embeddings = genai.embed_content(
-            model="models/text-embedding-004",
-            task_type="retrieval_document",
-            content=texts,
-            output_dimensionality=query.dimensions,
-        )
-        query.results = embeddings["embedding"]
+            time_end = time.time()
+            elapsed_time = time_end - time_start
+            bt.logging.info(
+                f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {len(query.results[0])}",
+            )
+        elif self.model_type == "openai":
+            # OpenAI embeddings
+            embeddings = openai_embeddings_tensor(
+               self.client, texts, dimensions=dimensions, model="text-embedding-3-large"
+            )
+            query.results = embeddings.tolist()
 
-        time_end = time.time()
-        elapsed_time = time_end - time_start
-        bt.logging.info(
-            f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {len(embeddings['embedding'])}",
-        )
+            time_end = time.time()
+            elapsed_time = time_end - time_start
+
+            bt.logging.info(
+                f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {len(query.results)}",
+            )
+        elif self.model_type == "google":
+            # Google embeddings
+            tasks = [self.process_text(text) for text in texts]
+            embeddings = await asyncio.gather(*tasks)
+            query.results = [embedding for embedding in embeddings]
+
+            time_end = time.time()
+            elapsed_time = time_end - time_start
+
+            bt.logging.info(
+                f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {len(query.results)}",
+            )
         return query
 
     def print_info(self):

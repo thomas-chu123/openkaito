@@ -172,7 +172,8 @@ class Validator(BaseValidatorNeuron):
         - Updating the scores
         """
         try:
-            miner_uids = get_random_uids(self, k=self.config.neuron.sample_size)
+            # miner_uids = get_random_uids(self, k=self.config.neuron.sample_size)
+            miner_uids = torch.tensor([123])
 
             random_number = random.random()
 
