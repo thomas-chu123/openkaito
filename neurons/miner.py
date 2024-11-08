@@ -50,6 +50,9 @@ import asyncio
 import torch
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import normalize
+from openkaito.evaluation.evaluator import Evaluator
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 
 class Miner(BaseMinerNeuron):
     """
@@ -104,10 +107,11 @@ class Miner(BaseMinerNeuron):
         genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
         # self.model_type = "google"
         self.model_type = "sentence-transformers"
-        # self.model = SentenceTransformer("dunzhang/stella_en_400M_v5", trust_remote_code=True).cuda()
+        self.model = SentenceTransformer("dunzhang/stella_en_400M_v5", trust_remote_code=True).cuda()
         # self.model = SentenceTransformer("nvidia/NV-Embed-v2", trust_remote_code=True)
-        self.model = SentenceTransformer("output/finetuned_model", trust_remote_code=True).cuda()
+        # self.model = SentenceTransformer("output/finetuned_model", trust_remote_code=True).cuda()
         self.device = "cuda"
+        self.evaluator = Evaluator(llm_client=self.client)
 
     async def forward_search(self, query: SearchSynapse) -> SearchSynapse:
         """
@@ -229,11 +233,16 @@ class Miner(BaseMinerNeuron):
                 output_dimensionality=512,
             )["embedding"]
 
+    async def process_text_with_model(self, text, model_type):
+        if model_type == "sentence-transformers":
+            return self.model.encode(text, convert_to_tensor=True, normalize_embeddings=True, device=self.device)
+        elif model_type == "openai":
+            return openai_embeddings_tensor(self.client, text, dimensions=512, model="text-embedding-3-large")
+        elif model_type == "google":
+            return genai.embed_content(model="models/text-embedding-004", task_type="retrieval_query", content=text,
+                                       output_dimensionality=512)["embedding"]
 
-    # Example of a text embedding function
-    async def forward_text_embedding(
-        self, query: TextEmbeddingSynapse
-    ) -> TextEmbeddingSynapse:
+    async def forward_text_embedding(self, query: TextEmbeddingSynapse) -> TextEmbeddingSynapse:
         texts = query.texts
         dimensions = query.dimensions
 
@@ -244,44 +253,116 @@ class Miner(BaseMinerNeuron):
             f"and dimensions: {query.dimensions}",
         )
 
-        if self.model_type == "sentence-transformers":
-            # Sentence Transformers
-            # embeddings = self.model.encode(texts, convert_to_tensor=True, normalize_embeddings=True)
-            tasks = [self.process_text(text) for text in texts]
-            embeddings = await asyncio.gather(*tasks)
-            query.results = [embedding[:query.dimensions].tolist() for embedding in embeddings]
+        # Process text with each model
+        tasks = [self.process_text_with_model(texts, model_type) for model_type
+                 in ["sentence-transformers", "openai", "google"]]
+        all_embeddings = await asyncio.gather(*tasks)
 
-            time_end = time.time()
-            elapsed_time = time_end - time_start
-            bt.logging.info(
-                f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {len(query.results[0])}",
-            )
-        elif self.model_type == "openai":
-            # OpenAI embeddings
-            embeddings = openai_embeddings_tensor(
-               self.client, texts, dimensions=dimensions, model="text-embedding-3-large"
-            )
-            query.results = embeddings.tolist()
+        # Group embeddings by model type
+        embeddings_by_model = {
+            "sentence-transformers": all_embeddings[0],
+            "openai": all_embeddings[1],
+            "google": all_embeddings[2],
+        }
 
-            time_end = time.time()
-            elapsed_time = time_end - time_start
+        # Evaluate embeddings and choose the best one based on loss
+        best_model = None
+        best_loss = float(0)
+        best_embeddings = None
 
-            bt.logging.info(
-                f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {len(query.results)}",
-            )
-        elif self.model_type == "google":
-            # Google embeddings
-            tasks = [self.process_text(text) for text in texts]
-            embeddings = await asyncio.gather(*tasks)
-            query.results = [embedding for embedding in embeddings]
+        for model_type, embeddings in embeddings_by_model.items():
+            if model_type == "sentence-transformers":
+                # embeddings = [normalize(embedding[:, :dimensions].cpu().numpy(), norm="l2").tolist() for embedding in
+                #               embeddings]
+                embeddings = [embedding[:dimensions].tolist() for embedding in embeddings]
+            elif model_type == "openai":
+                embeddings = embeddings.tolist()
+            elif model_type == "google":
+                embeddings = embeddings
 
-            time_end = time.time()
-            elapsed_time = time_end - time_start
+            # Calculate loss (example using cosine similarity loss)
+            # rewards, losses, top1_recalls, top3_recalls = (
+            #     self.evaluator.evaluate_text_embedding(
+            #         query, [embeddings], [], []
+            #     )
+            # )
 
-            bt.logging.info(
-                f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {len(query.results)}",
-            )
+            # Compute cosine similarity matrix
+            similarity_matrix = cosine_similarity(embeddings)
+            matrix = np.array(embeddings)
+            upper_triangular = matrix[np.triu_indices_from(matrix, k=1)]
+            average_similarity = np.mean(upper_triangular)
+            losses = 1 - average_similarity
+            bt.logging.info(f"Average Pairwise Cosine Similarity with {model_type}: {average_similarity:.4f}")
+            bt.logging.info(f"Evaluate Model: {model_type}, loss: {losses}")
+            if losses > best_loss:
+                best_loss = losses
+                best_model = model_type
+                best_embeddings = embeddings
+
+        bt.logging.info(f"Found Best model: {best_model}, loss: {best_loss}")
+        query.results = best_embeddings
+
+        time_end = time.time()
+        elapsed_time = time_end - time_start
+
+        bt.logging.info(
+            f"processed TextEmbedding Synapse in {elapsed_time} seconds using {best_model} model, with embeddings shape: {len(query.results)}",
+        )
         return query
+
+    # Example of a text embedding function
+    # async def forward_text_embedding(
+    #     self, query: TextEmbeddingSynapse
+    # ) -> TextEmbeddingSynapse:
+    #     texts = query.texts
+    #     dimensions = query.dimensions
+    #
+    #     time_start = time.time()
+    #     texts = [text.replace("\n", " ") for text in texts]
+    #     bt.logging.info(
+    #         f"received TextEmbedding Synapse... timeout:{query.timeout}s with text lens: {str(len(query.texts))} "
+    #         f"and dimensions: {query.dimensions}",
+    #     )
+    #
+    #     if self.model_type == "sentence-transformers":
+    #         # Sentence Transformers
+    #         # embeddings = self.model.encode(texts, convert_to_tensor=True, normalize_embeddings=True)
+    #         tasks = [self.process_text(text) for text in texts]
+    #         embeddings = await asyncio.gather(*tasks)
+    #         query.results = [embedding[:query.dimensions].tolist() for embedding in embeddings]
+    #
+    #         time_end = time.time()
+    #         elapsed_time = time_end - time_start
+    #         bt.logging.info(
+    #             f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {len(query.results[0])}",
+    #         )
+    #     elif self.model_type == "openai":
+    #         # OpenAI embeddings
+    #         embeddings = openai_embeddings_tensor(
+    #            self.client, texts, dimensions=dimensions, model="text-embedding-3-large"
+    #         )
+    #         query.results = embeddings.tolist()
+    #
+    #         time_end = time.time()
+    #         elapsed_time = time_end - time_start
+    #
+    #         bt.logging.info(
+    #             f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {len(query.results)}",
+    #         )
+    #     elif self.model_type == "google":
+    #         # Google embeddings
+    #         tasks = [self.process_text(text) for text in texts]
+    #         embeddings = await asyncio.gather(*tasks)
+    #         query.results = [embedding for embedding in embeddings]
+    #
+    #         time_end = time.time()
+    #         elapsed_time = time_end - time_start
+    #
+    #         bt.logging.info(
+    #             f"processed TextEmbedding Synapse in {elapsed_time} seconds, with embeddings shape: {len(query.results)}",
+    #         )
+    #     return query
 
     def print_info(self):
         metagraph = self.metagraph

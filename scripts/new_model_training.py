@@ -7,9 +7,9 @@ import torch
 # Model and dataset configuration
 # model_name = "dunzhang/stella_en_400M_v5"
 model_name = "distiluse-base-multilingual-cased-v2"
-model_size = 1000000
+model_size = 500000
 batch_size = 8
-num_epochs = 3
+num_epochs = 1
 model_device = "cuda" if torch.cuda.is_available() else "cpu"
 # Load the model
 model = SentenceTransformer(model_name, device=model_device, trust_remote_code=True).to(model_device)
@@ -36,7 +36,7 @@ print("Fine-tuning model...")
 model.fit(
     train_objectives=[(train_dataloader, train_loss)],
     epochs=num_epochs,
-    warmup_steps=warmup_steps
+    warmup_steps=warmup_steps,
 )
 
 # Evaluate the model
